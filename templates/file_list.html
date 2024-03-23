@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Uploaded Files</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f7f7f7;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .header {
+            text-align: center;
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+
+        /* Table Styles */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        th,
+        td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+
+        tr:hover {
+            background-color: #ddd;
+        }
+
+        /* Button Styles */
+        .button {
+            display: inline-block;
+            padding: 10px 20px;
+            margin: 10px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            text-decoration: none;
+            font-weight: bold;
+            align-content: end;
+        }
+
+        .button-primary {
+            background-color: #007bff;
+            color: #fff;
+        }
+
+        .button-primary:hover {
+            background-color: #0056b3;
+        }
+
+        .button-danger {
+            background-color: #dc3545;
+            color: #fff;
+        }
+
+        .button-danger:hover {
+            background-color: #c82333;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            
+            Uploaded Files
+        </div>
+        <table id="fileTable">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Size (Bytes)</th>
+                    <th>Download</th>
+                    <th>Delete</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for file in uploaded_files %}
+                <tr>
+                    <td>{{ file.name }}</td>
+                    <td>{{ file.size }}</td>
+                    <td><a href="{{ file.download_link }}" class="button button-primary">Download</a></td>
+                    <td><a href="{{ file.delete_link }}" class="button button-danger">Delete</a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <button class="button button-primary" onclick="goToHome()" >Back</button>
+    </div>
+</body>
+
+
+<script src="https://sdk.amazonaws.com/js/aws-sdk-2.932.0.min.js"></script>
+<script>
+    var region = "ap-south-1"
+    AWS.config.update({
+        region: region,
+        credentials: new AWS.Credentials(accessKeyId, secretAccessKey)
+    })
+
+    var s3 = new AWS.S3()
+
+    function refreshFileList(bucketname) {
+        var tableBody = document.querySelector("#fileTable tbody");
+        tableBody.innerHTML = "";
+
+        s3.listObjectsV2({ Bucket: bucketname }, (err, data) => {
+            if (err) {
+                console.log("Error fetching file list", err);
+            }
+            else {
+                data.Contents.forEach((object) => {
+                    var fileRow = document.createElement('tr')
+                    var fileNameCell = document.createElement('td')
+                    fileNameCell.textContent = object.Key
+                    fileRow.appendChild(fileNameCell)
+
+                    var fileSizeCell = document.createElement("td");
+                    fileSizeCell.textContent = object.Size;
+                    fileRow.appendChild(fileSizeCell);
+
+                    var downloadCell = document.createElement('td');
+                    var downloadLink = document.createElement('a');
+                    downloadLink.href = s3.getSignedUrl("getObject", {
+                        Bucket: bucketname,
+                        Key: object.Key,
+                    });
+                    downloadLink.addEventListener('click', () => {
+                    fetch('/log', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({message: 'File downloaded: ' + object.Key}),
+                    });
+                });
+                    downloadLink.textContent = "Download"
+                    downloadCell.appendChild(downloadLink)
+                    fileRow.appendChild(downloadCell)
+
+                    var deleteCell = document.createElement('td')
+                    var deleteButton = document.createElement('button')
+                    deleteButton.textContent = 'Delete'
+                    deleteButton.addEventListener('click', () => {
+                        deleteFile(bucketname, object.Key)
+                    })
+                    deleteCell.appendChild(deleteButton)
+                    fileRow.appendChild(deleteCell)
+
+                    tableBody.appendChild(fileRow)
+                })
+            }
+        })
+    }
+
+    function deleteFile(bucketname, key) {
+        var params = {
+            Bucket: bucketname,
+            Key: key
+        }
+
+        s3.deleteObject(params, (err, data) => {
+            if (err) {
+        console.log("Error", err);
+    } 
+    if (data) {
+        console.log("Delete Success");
+        fetch('/log', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({message: 'File deleted: ' + key}),
+        });
+        alert("File deleted Successfully!")
+        refreshFileList(bucketname)
+    }
+        })
+    }
+
+    function uploadFiles(bucketname) {
+        let files = document.getElementById('fileInput').files
+
+        var fileCount = files.length
+
+        for (var i = 0; i < fileCount; i++) {
+            var file = files[i];
+            var params = {
+                Bucket: bucketname,
+                Key: file.name,
+                Body: file
+            }
+
+            s3.upload(params, (err, data) => {
+                if (err) {
+        console.log("Error", err);
+    } 
+    if (data) {
+        console.log("Upload Success", data.Location);
+        fetch('/log', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({message: 'File uploaded: ' + file.name}),
+        });
+        alert("File Uploaded successfully!")
+        refreshFileList(bucketname)
+    }
+            })
+        }
+    }
+
+    function goToHome() {
+        window.location.href = "/"; // Redirect to the home page
+    }
+
+    function previewFiles() {
+        var previewContainer = document.getElementById('filePreview');
+        previewContainer.innerHTML = ''; // Clear previous previews
+
+        var files = document.getElementById('fileInput').files;
+        for (var i = 0; i < files.length; i++) {
+            var file = files[i];
+            if (file.type.startsWith('image/')) {
+                var reader = new FileReader();
+                reader.onload = function(event) {
+                    var img = document.createElement('img');
+                    img.src = event.target.result;
+                    img.style.maxWidth = '300px'; // Adjust preview image size
+                    previewContainer.appendChild(img);
+                }
+                reader.readAsDataURL(file);
+            } else {
+                var p = document.createElement('p');
+                p.textContent = file.name + ' - ' + file.type;
+                previewContainer.appendChild(p);
+            }
+        }
+    }
+
+    refreshFileList("mypackage1");
+</script>
+
+</html>
